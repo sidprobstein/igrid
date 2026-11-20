@@ -108,6 +108,7 @@ input[type="range"] { width: 110px; accent-color: var(--accent); }
   background: rgba(20, 20, 18, .72); color: #fff; font-size: 14px; line-height: 1; backdrop-filter: blur(6px);
 }
 .tile .acts button:hover { background: #111; }
+.tile .acts button[hidden] { display: none; }
 .tile .acts .del:hover { background: var(--danger); }
 .tile.dragging { opacity: .35; }
 .tile.before::before, .tile.after::before {

@@ -280,11 +280,12 @@ function tileEl(item, T, fit, boardName) {
   if (!el) {
     el = document.createElement('div');
     el.dataset.id = item.id;
-    el.innerHTML = `<div class="backdrop"></div><img class="pic" loading="lazy" draggable="false" alt="" src="/img/${item.file}.webp"><div class="cap"></div><div class="acts"><button class="info" title="Details (Space)">✎</button><button class="del" title="Delete (Backspace)">✕</button></div>`;
+    el.innerHTML = `<div class="backdrop"></div><img class="pic" loading="lazy" draggable="false" alt="" src="/img/${item.file}.webp"><div class="cap"></div><div class="acts"><button class="top" title="Move to top of board">↑</button><button class="info" title="Details (Space)">✎</button><button class="del" title="Delete (Backspace)">✕</button></div>`;
     tiles.set(item.id, el);
   }
   el.className = 'tile';
   el.draggable = S.view === 'board' && !filtered();
+  $('.top', el).hidden = S.view !== 'board' || S.items[0]?.id === item.id;
   const sub = [boardName, item.tags.map((t) => '#' + t).join(' ')].filter(Boolean).join('  ');
   $('.cap', el).innerHTML = (item.name ? `<b>${esc(item.name)}</b>` : '') + (sub ? `<span>${esc(sub)}</span>` : '');
   $('img.pic', el).alt = item.name;
@@ -340,10 +341,24 @@ main.addEventListener('click', (e) => {
   const tile = e.target.closest('.tile[data-id]'); if (!tile) return;
   const item = findItem(tile.dataset.id); if (!item) return;
   if (e.target.closest('.del')) return removeItem(item);
+  if (e.target.closest('.top')) return moveToTop(item);
   if (e.target.closest('.info') || !item.source_url) return openDetail(item.id);
   window.open(item.source_url, '_blank', 'noopener');
 });
 main.addEventListener('mouseover', (e) => { const t = e.target.closest('.tile[data-id]'); S.hover = t ? +t.dataset.id : null; });
+
+async function saveOrder() {
+  S.busy++;
+  try { await api(`/api/boards/${S.board.id}/order`, { method: 'PUT', json: { ids: S.items.map((i) => i.id) } }); }
+  catch (err) { oops(err); } finally { S.busy--; }
+}
+
+async function moveToTop(item) {
+  if (S.view !== 'board' || S.items[0]?.id === item.id) return;
+  S.items = [item, ...S.items.filter((i) => i.id !== item.id)];
+  renderGrid();
+  await saveOrder();
+}
 
 async function removeItem(item) {
   try {
@@ -393,9 +408,7 @@ main.addEventListener('drop', async (e) => {
     rest.splice(at, 0, moving);
     S.items = rest;
     renderGrid();
-    S.busy++;
-    try { await api(`/api/boards/${S.board.id}/order`, { method: 'PUT', json: { ids: S.items.map((i) => i.id) } }); }
-    catch (err) { oops(err); } finally { S.busy--; }
+    await saveOrder();
   }
 });
 main.addEventListener('dragend', () => { drag = null; clearMarks(); main.querySelectorAll('.dragging').forEach((t) => t.classList.remove('dragging')); });
