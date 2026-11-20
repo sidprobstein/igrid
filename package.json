@@ -4,6 +4,7 @@
   "description": "Local image grid: boards of images captured from the web",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "scripts": { "start": "node server.js" },
   "engines": { "node": ">=22.5" },
   "dependencies": { "sharp": "^0.35.5" }

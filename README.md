@@ -85,3 +85,7 @@ public/              the app (plain JS, no build)
 extension/           Chrome extension (Manifest V3)
 data/                your boards and images (not in git)
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
