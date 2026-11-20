@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>igrid</title>
+<link rel="icon" href="/icon.svg">
+<link rel="stylesheet" href="/app.css">
+<script>
+  // Apply the saved theme before first paint.
+  try { const t = localStorage.getItem('igrid-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}
+</script>
+</head>
+<body>
+<header id="bar"></header>
+<div id="tagbar"></div>
+<main id="main"></main>
+<div id="dropveil"><div>Drop to add to this board</div></div>
+<div id="toasts"></div>
+<dialog id="ask"></dialog>
+<dialog id="detail"></dialog>
+<input type="file" id="filepick" accept="image/*" multiple hidden>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

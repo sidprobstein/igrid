@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "igrid",
+  "version": "0.1.0",
+  "description": "Right-click any image to save it to a local igrid board.",
+  "permissions": ["contextMenus", "scripting", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Open igrid" },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+  "content_scripts": [
+    { "matches": ["http://localhost:4747/*", "http://127.0.0.1:4747/*"], "js": ["bridge.js"], "run_at": "document_start" }
+  ]
+}
