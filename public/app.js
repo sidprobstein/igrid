@@ -20,6 +20,7 @@ const S = {
   boards: [], board: null, items: [],
   q: '', tags: new Set(), results: null,
   pending: 0, busy: 0, hover: null,
+  sel: new Set(), anchor: null,   // multi-select: chosen ids, and where a shift-click range starts
 };
 
 const bar = $('#bar'), main = $('#main'), tagbar = $('#tagbar');
@@ -133,7 +134,7 @@ const tellExtension = () => window.postMessage({ igrid: 'boards-changed' }, loca
 // ---------------------------------------------------------------------------
 async function go() {
   const h = location.hash.replace(/^#\/?/, '');
-  S.q = ''; S.tags.clear(); S.results = null; S.hover = null; tagbar.innerHTML = ''; tiles.clear();
+  S.q = ''; S.tags.clear(); S.results = null; S.hover = null; tagbar.innerHTML = ''; tiles.clear(); S.sel.clear(); S.anchor = null; renderSelbar();
   const m = h.match(/^b\/(\d+)$/);
   try {
     if (m) { S.view = 'board'; await loadBoard(+m[1]); renderBoardBar(); renderGrid(); }
@@ -280,10 +281,10 @@ function tileEl(item, T, fit, boardName) {
   if (!el) {
     el = document.createElement('div');
     el.dataset.id = item.id;
-    el.innerHTML = `<div class="backdrop"></div><img class="pic" loading="lazy" draggable="false" alt="" src="/img/${item.file}.webp"><div class="cap"></div><div class="acts"><button class="top" title="Move to top of board">↑</button><button class="bottom" title="Move to bottom of board">↓</button><button class="info" title="Details (Space)">✎</button><button class="del" title="Delete (Backspace)">✕</button></div>`;
+    el.innerHTML = `<div class="backdrop"></div><img class="pic" loading="lazy" draggable="false" alt="" src="/img/${item.file}.webp"><div class="cap"></div><button class="sel" title="Select (or Cmd-click, Shift-click for a range)">✓</button><div class="acts"><button class="top" title="Move to top of board">↑</button><button class="bottom" title="Move to bottom of board">↓</button><button class="info" title="Details (Space)">✎</button><button class="del" title="Delete (Backspace)">✕</button></div>`;
     tiles.set(item.id, el);
   }
-  el.className = 'tile';
+  el.className = S.sel.has(item.id) ? 'tile selected' : 'tile';
   el.draggable = S.view === 'board' && !filtered();
   $('.top', el).hidden = S.view !== 'board' || S.items[0]?.id === item.id;
   $('.bottom', el).hidden = S.view !== 'board' || S.items.at(-1)?.id === item.id;
@@ -298,6 +299,8 @@ function tileEl(item, T, fit, boardName) {
 function renderGrid() {
   if (S.view !== 'board') return renderHome();
   const list = visibleItems();
+  for (const id of S.sel) if (!S.items.some((i) => i.id === id)) S.sel.delete(id);
+  renderSelbar();
   $('#count').textContent = filtered() ? `${list.length} of ${S.items.length}` : `${S.items.length} ${S.items.length === 1 ? 'image' : 'images'}`;
   renderTagbar();
 
@@ -314,7 +317,7 @@ function renderGrid() {
   const T = shape === 'auto' ? autoAspect(S.items) : +shape;
   const fit = setting('fit', 'smart');
   const grid = document.createElement('div');
-  grid.className = 'grid';
+  grid.className = S.sel.size ? 'grid selecting' : 'grid';
   grid.style.setProperty('--size', setting('size', 220) + 'px');
   grid.style.setProperty('--ar', T);
   for (const it of list) grid.append(tileEl(it, T, fit));
@@ -341,12 +344,50 @@ const findItem = (id) => currentList().find((i) => i.id === +id);
 main.addEventListener('click', (e) => {
   const tile = e.target.closest('.tile[data-id]'); if (!tile) return;
   const item = findItem(tile.dataset.id); if (!item) return;
-  if (e.target.closest('.del')) return removeItem(item);
-  if (e.target.closest('.top')) return moveToEnd(item, true);
-  if (e.target.closest('.bottom')) return moveToEnd(item, false);
+  const onButton = e.target.closest('.acts button');
+  if (S.view === 'board' && !onButton) {
+    if (e.shiftKey && S.anchor != null) return selectRange(item.id);
+    if (e.target.closest('.sel') || e.metaKey || e.ctrlKey || S.sel.size) return toggleSelect(item.id);
+  }
+  // A button on a selected tile acts on the whole selection.
+  const group = S.sel.has(item.id) && S.sel.size > 1 ? selectedItems() : [item];
+  if (e.target.closest('.del')) return removeItems(group);
+  if (e.target.closest('.top')) return moveToEnd(group, true);
+  if (e.target.closest('.bottom')) return moveToEnd(group, false);
   if (e.target.closest('.info') || !item.source_url) return openDetail(item.id);
   window.open(item.source_url, '_blank', 'noopener');
 });
+
+// ---- Multi-select ----
+const selectedItems = () => S.items.filter((i) => S.sel.has(i.id));   // always in board order
+function toggleSelect(id) {
+  S.sel.has(id) ? S.sel.delete(id) : S.sel.add(id);
+  S.anchor = id;
+  renderGrid();
+}
+function selectRange(id) {
+  const list = visibleItems();
+  const a = list.findIndex((i) => i.id === S.anchor), b = list.findIndex((i) => i.id === id);
+  if (a < 0 || b < 0) return toggleSelect(id);
+  for (let i = Math.min(a, b); i <= Math.max(a, b); i++) S.sel.add(list[i].id);
+  renderGrid();
+}
+function clearSelection() { if (!S.sel.size) return; S.sel.clear(); S.anchor = null; renderGrid(); }
+function renderSelbar() {
+  const bar = $('#selbar'), n = S.view === 'board' ? S.sel.size : 0;
+  document.body.classList.toggle('has-selection', n > 0);
+  bar.hidden = !n;
+  if (n) $('#selcount').textContent = `${n} selected`;
+}
+$('#selbar').onclick = (e) => {
+  const act = e.target.closest('button')?.dataset.act; if (!act) return;
+  if (act === 'clear') return clearSelection();
+  if (act === 'all') { for (const i of visibleItems()) S.sel.add(i.id); return renderGrid(); }
+  const group = selectedItems();
+  if (act === 'top') moveToEnd(group, true);
+  if (act === 'bottom') moveToEnd(group, false);
+  if (act === 'delete') removeItems(group);
+};
 main.addEventListener('mouseover', (e) => { const t = e.target.closest('.tile[data-id]'); S.hover = t ? +t.dataset.id : null; });
 
 async function saveOrder() {
@@ -355,27 +396,33 @@ async function saveOrder() {
   catch (err) { oops(err); } finally { S.busy--; }
 }
 
-async function moveToEnd(item, top) {
-  if (S.view !== 'board') return;
-  const rest = S.items.filter((i) => i.id !== item.id);
-  S.items = top ? [item, ...rest] : [...rest, item];
+async function moveToEnd(group, top) {
+  if (S.view !== 'board' || !group.length) return;
+  const ids = new Set(group.map((i) => i.id));
+  const rest = S.items.filter((i) => !ids.has(i.id));
+  S.items = top ? [...group, ...rest] : [...rest, ...group];
   renderGrid();
   await saveOrder();
 }
 
-async function removeItem(item) {
+const removeItem = (item) => removeItems([item]);
+async function removeItems(group) {
+  if (!group.length) return;
+  const ids = new Set(group.map((i) => i.id));
+  S.busy++;
   try {
-    await api('/api/items/' + item.id, { method: 'DELETE' });
-    S.items = S.items.filter((i) => i.id !== item.id);
-    if (S.results) S.results = S.results.filter((i) => i.id !== item.id);
+    await Promise.all(group.map((i) => api('/api/items/' + i.id, { method: 'DELETE' })));
+    S.items = S.items.filter((i) => !ids.has(i.id));
+    if (S.results) S.results = S.results.filter((i) => !ids.has(i.id));
+    for (const id of ids) S.sel.delete(id);
     S.hover = null;
     renderGrid();
-    toast('Image deleted', { action: 'Undo', onAction: async () => {
-      await api(`/api/items/${item.id}/restore`, { method: 'POST' });
-      if (S.view === 'board' && S.board.id === item.board_id) { await loadBoard(S.board.id); renderGrid(); }
+    toast(group.length === 1 ? 'Image deleted' : `${group.length} images deleted`, { action: 'Undo', onAction: async () => {
+      await Promise.all(group.map((i) => api(`/api/items/${i.id}/restore`, { method: 'POST' })));
+      if (S.view === 'board' && S.board.id === group[0].board_id) { await loadBoard(S.board.id); renderGrid(); }
       else if (S.results) { S.results = await api('/api/search?q=' + encodeURIComponent(S.q)); renderHome(); }
     } });
-  } catch (e) { oops(e); }
+  } catch (e) { oops(e); } finally { S.busy--; }
 }
 
 // ---- Reordering: the order is the user's, and only the user changes it ----
@@ -384,17 +431,28 @@ const clearMarks = () => main.querySelectorAll('.before,.after').forEach((t) => 
 main.addEventListener('dragstart', (e) => {
   const tile = e.target.closest?.('.tile[data-id]');
   if (!tile || S.view !== 'board' || filtered()) return;
-  drag = { id: +tile.dataset.id, target: null };
+  const id = +tile.dataset.id;
+  // Dragging a selected tile carries the whole selection; any other tile travels alone.
+  const ids = S.sel.has(id) && S.sel.size > 1 ? new Set(S.sel) : new Set([id]);
+  drag = { ids, target: null };
   e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('application/x-igrid', String(drag.id));
-  requestAnimationFrame(() => tile.classList.add('dragging'));
+  e.dataTransfer.setData('application/x-igrid', [...ids].join(','));
+  if (ids.size > 1) {
+    const ghost = document.createElement('div');
+    ghost.className = 'dragghost';
+    ghost.textContent = `${ids.size} images`;
+    document.body.append(ghost);
+    e.dataTransfer.setDragImage(ghost, 20, 20);
+    setTimeout(() => ghost.remove(), 0);
+  }
+  requestAnimationFrame(() => { for (const i of ids) tiles.get(i)?.classList.add('dragging'); });
 });
 main.addEventListener('dragover', (e) => {
   if (!drag) return;
   e.preventDefault();
   const tile = e.target.closest('.tile[data-id]');
   clearMarks();
-  if (!tile || +tile.dataset.id === drag.id) { drag.target = null; return; }
+  if (!tile || drag.ids.has(+tile.dataset.id)) { drag.target = null; return; }
   const r = tile.getBoundingClientRect();
   const after = e.clientX > r.left + r.width / 2;
   tile.classList.add(after ? 'after' : 'before');
@@ -403,12 +461,12 @@ main.addEventListener('dragover', (e) => {
 main.addEventListener('drop', async (e) => {
   if (!drag) return;
   e.preventDefault();
-  const { id, target } = drag;
+  const { ids, target } = drag;
   if (target) {
-    const moving = S.items.find((i) => i.id === id);
-    const rest = S.items.filter((i) => i.id !== id);
+    const moving = S.items.filter((i) => ids.has(i.id));      // keeps their order relative to each other
+    const rest = S.items.filter((i) => !ids.has(i.id));
     const at = rest.findIndex((i) => i.id === target.id) + (target.after ? 1 : 0);
-    rest.splice(at, 0, moving);
+    rest.splice(at, 0, ...moving);
     S.items = rest;
     renderGrid();
     await saveOrder();
@@ -591,6 +649,11 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (typing || $('dialog[open]')) return;
+  if (S.view === 'board') {
+    if (e.key === 'Escape' && S.sel.size) return clearSelection();
+    if ((e.metaKey || e.ctrlKey) && e.key === 'a') { e.preventDefault(); for (const i of visibleItems()) S.sel.add(i.id); return renderGrid(); }
+    if ((e.key === 'Backspace' || e.key === 'Delete') && S.sel.size) { e.preventDefault(); return removeItems(selectedItems()); }
+  }
   if (e.key === '/') { e.preventDefault(); $('#search')?.focus(); return; }
   const item = S.hover && findItem(S.hover);
   if (!item) return;
