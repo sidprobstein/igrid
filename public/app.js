@@ -439,6 +439,7 @@ $('#selbar').onclick = (e) => {
   if (act === 'top') moveToEnd(group, true);
   if (act === 'bottom') moveToEnd(group, false);
   if (act === 'delete') removeItems(group);
+  if (act === 'move') moveToBoard(group);
 };
 main.addEventListener('mouseover', (e) => { const t = e.target.closest('.tile[data-id]'); S.hover = t ? +t.dataset.id : null; });
 
@@ -455,6 +456,51 @@ async function moveToEnd(group, top) {
   S.items = top ? [...group, ...rest] : [...rest, ...group];
   renderGrid();
   await saveOrder();
+}
+
+// Choose a destination board for the selection. Resolves to a board or null.
+async function pickBoard(count) {
+  const boards = (await api('/api/boards')).filter((b) => b.id !== S.board.id);
+  const d = $('#ask');
+  d.innerHTML = `<form method="dialog"><h2>Move ${count === 1 ? '1 image' : count + ' images'} to</h2>
+    <div class="picklist">${boards.map((b) => `<button class="pick" value="b${b.id}"><span>${esc(b.name)}</span><small>${b.count}</small></button>`).join('')}
+    <button class="pick" value="new"><span>New board…</span></button></div>
+    <div class="row"><button class="btn" value="cancel" formnovalidate>Cancel</button></div></form>`;
+  const choice = await new Promise((resolve) => { d.onclose = () => resolve(d.returnValue); d.returnValue = ''; d.showModal(); });
+  if (choice === 'new') {
+    const name = await ask({ title: 'New board', placeholder: 'Board name', cta: 'Create and move' });
+    if (!name) return null;
+    const b = await api('/api/boards', { method: 'POST', json: { name } });
+    tellExtension();
+    return b;
+  }
+  return boards.find((b) => 'b' + b.id === choice) || null;
+}
+
+async function moveToBoard(group) {
+  if (S.view !== 'board' || !group.length) return;
+  const from = S.board, order = S.items.map((i) => i.id);
+  S.busy++;
+  try {
+    const dest = await pickBoard(group.length);
+    if (!dest) return;
+    const r = await api('/api/items/move', { method: 'POST', json: { ids: group.map((i) => i.id), board_id: dest.id } });
+    const gone = new Set(r.moved);
+    S.items = S.items.filter((i) => !gone.has(i.id));
+    for (const id of gone) S.sel.delete(id);
+    S.hover = null;
+    renderGrid();
+    const n = r.moved.length, k = r.skipped.length;
+    const kept = k ? ` ${k} already there, left here.` : '';
+    if (!n) return toast(`Nothing moved.${kept}`);
+    toast(`${n === 1 ? '1 image' : n + ' images'} moved to ${dest.name}.${kept}`, { action: 'Undo', onAction: async () => {
+      try {
+        await api('/api/items/move', { method: 'POST', json: { ids: r.moved, board_id: from.id } });
+        await api(`/api/boards/${from.id}/order`, { method: 'PUT', json: { ids: order } });
+        if (S.view === 'board' && S.board.id === from.id) { await loadBoard(from.id); renderGrid(); }
+      } catch (e) { oops(e); }
+    } });
+  } catch (e) { oops(e); } finally { S.busy--; }
 }
 
 const removeItem = (item) => removeItems([item]);

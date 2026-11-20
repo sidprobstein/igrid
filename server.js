@@ -311,6 +311,29 @@ async function route(req, res) {
     return send(res, 200, { ok: true });
   }
 
+  // Move images to another board. They land at the end, in the order given.
+  // An image the destination already holds (exact match) stays where it is.
+  if (p === '/api/items/move' && m === 'POST') {
+    const body = await readJson(req);
+    const dest = Number.isInteger(body.board_id) && getBoard(body.board_id);
+    if (!dest) return fail(res, 404, 'No such board');
+    if (!Array.isArray(body.ids)) return fail(res, 400, 'ids required');
+    const moved = [], skipped = [];
+    db.exec('BEGIN');
+    try {
+      let pos = nextPosition(dest.id);
+      for (const id of body.ids) {
+        const row = q(`SELECT * FROM items WHERE id = ? AND deleted_at IS NULL`).get(+id);
+        if (!row || row.board_id === dest.id) continue;
+        if (row.hash && existingCopy(dest.id, row.hash)) { skipped.push(row.id); continue; }
+        q(`UPDATE items SET board_id = ?, position = ? WHERE id = ?`).run(dest.id, pos++, row.id);
+        moved.push(row.id);
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    return send(res, 200, { moved, skipped, board: { id: dest.id, name: dest.name } });
+  }
+
   if ((x = p.match(/^\/api\/items\/(\d+)(\/restore)?$/))) {
     const row = q(`SELECT * FROM items WHERE id = ?`).get(+x[1]);
     if (!row) return fail(res, 404, 'No such item');

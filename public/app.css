@@ -238,3 +238,8 @@ dialog::backdrop { background: rgba(10, 10, 8, .5); backdrop-filter: blur(2px); 
   #detail aside { border-left: 0; border-top: 1px solid var(--line); }
   .search { width: 140px; }
 }
+
+.picklist { display: grid; gap: 2px; max-height: 50vh; overflow: auto; margin: 0 -8px; }
+.pick { display: flex; justify-content: space-between; gap: 12px; align-items: center; border: 0; background: none; color: inherit; font: inherit; text-align: left; padding: 9px 10px; border-radius: 9px; cursor: pointer; }
+.pick:hover, .pick:focus-visible { background: var(--tile); }
+.pick small { color: var(--muted); font-variant-numeric: tabular-nums; }
