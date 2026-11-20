@@ -87,7 +87,8 @@ async function save(boardId, boardName, info, tab) {
     });
   }
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'igrid could not save that image');
-  note(tab, 'Saved to ' + boardName);
+  const saved = await res.json().catch(() => ({}));
+  note(tab, (saved.duplicate ? 'Already on ' : 'Saved to ') + boardName);
 }
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {

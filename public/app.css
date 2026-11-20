@@ -79,10 +79,11 @@ input[type="range"] { width: 110px; accent-color: var(--accent); }
 
 /* ---- Main ---- */
 #main { padding: 16px 20px 80px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--size, 220px), 1fr)); gap: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--size, 220px), 1fr)); gap: clamp(3px, calc(var(--size, 220px) * .055), 12px); }
 
 .tile {
-  position: relative; aspect-ratio: var(--ar, 1); border-radius: 10px; overflow: hidden; background: var(--tile);
+  position: relative; aspect-ratio: var(--ar, 1); border-radius: clamp(3px, calc(var(--size, 220px) * .045), 10px); overflow: hidden; background: var(--tile);
+  container-type: inline-size;
   cursor: pointer; isolation: isolate; outline: 0 solid transparent; transition: transform .12s ease, opacity .12s;
 }
 .tile img.pic { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; -webkit-user-drag: none; user-select: none; }
@@ -109,6 +110,20 @@ input[type="range"] { width: 110px; accent-color: var(--accent); }
 }
 .tile .acts button:hover { background: #111; }
 .tile .acts button[hidden] { display: none; }
+/* Small tiles: the buttons shrink, then thin out, so they never cover the picture. */
+@container (max-width: 150px) {
+  .tile .acts { top: 4px; right: 4px; gap: 3px; }
+  .tile .acts button { width: 22px; height: 22px; font-size: 12px; }
+  .tile .cap { padding: 14px 6px 5px; font-size: 11px; }
+}
+@container (max-width: 112px) {
+  .tile .acts { top: 3px; right: 3px; gap: 2px; }
+  .tile .acts button { width: 17px; height: 17px; font-size: 10px; }
+  .tile .cap { display: none; }
+}
+@container (max-width: 84px) {
+  .tile .acts .top, .tile .acts .bottom { display: none; }
+}
 .tile .acts .del:hover { background: var(--danger); }
 .tile.dragging { opacity: .35; }
 .tile.before::before, .tile.after::before {

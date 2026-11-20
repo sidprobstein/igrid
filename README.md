@@ -38,9 +38,10 @@ cd /Users/sid/Code/igrid && launchctl bootout gui/$(id -u)/work.igrid.server && 
 | Boards | Create, rename (click the title), archive and restore. Boards are never deleted. |
 | Capture | Right-click any image in Chrome, **Save to igrid**, pick a board (extension). Also: drag an image in from another window, paste with Cmd+V, add by address, upload files. |
 | Grid | Size slider, tile shape (Auto follows the board's typical image), fit mode. Saved per board. |
-| Order | Drag tiles, or use the arrow on a tile to send it to the top. New images go to the end. Nothing else ever reorders a board. |
+| Order | Drag tiles, or use the arrows on a tile to send it to the top or bottom. New images go to the end. Nothing else ever reorders a board. |
 | Names and tags | Optional, in the details view (pencil button or Space while hovering). |
 | Search | In a board: names, tags, page titles, source sites. On the home page: across all boards. Tag chips filter. `/` focuses search. |
+| Duplicates | An image whose file is byte-for-byte identical to one already on the board is not added again. Existing exact duplicates are removed when the server starts: the first copy stays and inherits any name, tags or link it lacked. |
 | Delete | X on the tile, or Backspace while hovering. Undo for a few seconds; files are purged after 7 days. |
 | Click-through | Clicking a tile opens the page it was saved from. |
 | Pinterest | Paste a public board link. All pins, Pinterest's order, original resolution, each linked to its outbound page. Importing the same board again adds only new pins. |

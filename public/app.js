@@ -232,7 +232,7 @@ function renderBoardBar() {
     <input class="title" id="title" value="${esc(b.name)}" spellcheck="false" title="Rename board">
     <span class="count" id="count"></span><span class="spacer"></span>
     <input class="search" id="search" type="search" placeholder="Search names and tags">
-    <label class="ctl" title="Tile size">Size <input type="range" id="size" min="110" max="520" step="10" value="${setting('size', 220)}"></label>
+    <label class="ctl" title="Tile size">Size <input type="range" id="size" min="50" max="520" step="5" value="${setting('size', 220)}"></label>
     <select id="shape" title="Tile shape">${SHAPES.map(([v, l]) => `<option value="${v}" ${setting('shape', 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
     <select id="fit" title="How images fill tiles">${FITS.map(([v, l]) => `<option value="${v}" ${setting('fit', 'smart') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
     <div class="menuwrap"><button class="btn primary" data-menu>Add</button><div class="menu">
@@ -280,12 +280,13 @@ function tileEl(item, T, fit, boardName) {
   if (!el) {
     el = document.createElement('div');
     el.dataset.id = item.id;
-    el.innerHTML = `<div class="backdrop"></div><img class="pic" loading="lazy" draggable="false" alt="" src="/img/${item.file}.webp"><div class="cap"></div><div class="acts"><button class="top" title="Move to top of board">↑</button><button class="info" title="Details (Space)">✎</button><button class="del" title="Delete (Backspace)">✕</button></div>`;
+    el.innerHTML = `<div class="backdrop"></div><img class="pic" loading="lazy" draggable="false" alt="" src="/img/${item.file}.webp"><div class="cap"></div><div class="acts"><button class="top" title="Move to top of board">↑</button><button class="bottom" title="Move to bottom of board">↓</button><button class="info" title="Details (Space)">✎</button><button class="del" title="Delete (Backspace)">✕</button></div>`;
     tiles.set(item.id, el);
   }
   el.className = 'tile';
   el.draggable = S.view === 'board' && !filtered();
   $('.top', el).hidden = S.view !== 'board' || S.items[0]?.id === item.id;
+  $('.bottom', el).hidden = S.view !== 'board' || S.items.at(-1)?.id === item.id;
   const sub = [boardName, item.tags.map((t) => '#' + t).join(' ')].filter(Boolean).join('  ');
   $('.cap', el).innerHTML = (item.name ? `<b>${esc(item.name)}</b>` : '') + (sub ? `<span>${esc(sub)}</span>` : '');
   $('img.pic', el).alt = item.name;
@@ -341,7 +342,8 @@ main.addEventListener('click', (e) => {
   const tile = e.target.closest('.tile[data-id]'); if (!tile) return;
   const item = findItem(tile.dataset.id); if (!item) return;
   if (e.target.closest('.del')) return removeItem(item);
-  if (e.target.closest('.top')) return moveToTop(item);
+  if (e.target.closest('.top')) return moveToEnd(item, true);
+  if (e.target.closest('.bottom')) return moveToEnd(item, false);
   if (e.target.closest('.info') || !item.source_url) return openDetail(item.id);
   window.open(item.source_url, '_blank', 'noopener');
 });
@@ -353,9 +355,10 @@ async function saveOrder() {
   catch (err) { oops(err); } finally { S.busy--; }
 }
 
-async function moveToTop(item) {
-  if (S.view !== 'board' || S.items[0]?.id === item.id) return;
-  S.items = [item, ...S.items.filter((i) => i.id !== item.id)];
+async function moveToEnd(item, top) {
+  if (S.view !== 'board') return;
+  const rest = S.items.filter((i) => i.id !== item.id);
+  S.items = top ? [item, ...rest] : [...rest, item];
   renderGrid();
   await saveOrder();
 }
@@ -418,7 +421,7 @@ main.addEventListener('dragend', () => { drag = null; clearMarks(); main.querySe
 // ---------------------------------------------------------------------------
 async function adding(fn) {
   S.pending++; S.busy++; renderGrid();
-  try { const item = await fn(); S.items.push(item); }
+  try { const item = await fn(); if (item.duplicate) toast('Already on this board'); else S.items.push(item); }
   catch (e) { oops(e); }
   finally { S.pending--; S.busy--; renderGrid(); }
 }
@@ -477,8 +480,8 @@ async function importPinterest(boardId) {
     }
     if (job.status === 'error') return t.close(job.error, 7000);
     if (S.board?.id === job.boardId) { await loadBoard(job.boardId); renderGrid(); }
-    const saved = job.total - job.failed;
-    const notes = [job.skipped && `${job.skipped} already here`, job.failed && `${job.failed} could not be fetched`, job.partial && 'Pinterest only shared part of this board'].filter(Boolean);
+    const saved = job.total - job.failed - (job.dupes || 0);
+    const notes = [job.skipped && `${job.skipped} already here`, job.dupes && `${job.dupes} exact duplicates skipped`, job.failed && `${job.failed} could not be fetched`, job.partial && 'Pinterest only shared part of this board'].filter(Boolean);
     t.close(`Imported ${saved} ${saved === 1 ? 'image' : 'images'}${notes.length ? ' (' + notes.join(', ') + ')' : ''}`, 6000);
   } catch (e) { t.close(e.message, 7000); }
 }

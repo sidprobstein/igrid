@@ -54,6 +54,37 @@ db.exec(`
 
 const now = () => new Date().toISOString();
 const q = (sql) => db.prepare(sql);
+const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+
+// Exact-duplicate detection: every image carries the hash of its original file.
+if (!q(`PRAGMA table_info(items)`).all().some((c) => c.name === 'hash')) db.exec(`ALTER TABLE items ADD COLUMN hash TEXT`);
+db.exec(`CREATE INDEX IF NOT EXISTS items_hash ON items(board_id, hash)`);
+for (const row of q(`SELECT id, file FROM items WHERE hash IS NULL`).all()) {
+  try { q(`UPDATE items SET hash = ? WHERE id = ?`).run(sha(fs.readFileSync(path.join(IMAGES, row.file + '.orig'))), row.id); } catch {}
+}
+
+// Keep the first copy of each identical file on a board; later copies hand
+// over any name, tags or link the first one lacks, then go to the trash.
+function dedupeBoard(boardId) {
+  const rows = q(`SELECT * FROM items WHERE board_id = ? AND deleted_at IS NULL AND hash IS NOT NULL ORDER BY position, id`).all(boardId);
+  const first = new Map();
+  let removed = 0;
+  for (const r of rows) {
+    const keep = first.get(r.hash);
+    if (!keep) { first.set(r.hash, r); continue; }
+    keep.name = keep.name || r.name;
+    keep.source_url = keep.source_url || r.source_url;
+    keep.tags = JSON.stringify([...new Set([...JSON.parse(keep.tags), ...JSON.parse(r.tags)])]);
+    q(`UPDATE items SET name = ?, source_url = ?, tags = ? WHERE id = ?`).run(keep.name, keep.source_url, keep.tags, keep.id);
+    q(`UPDATE items SET deleted_at = ? WHERE id = ?`).run(now(), r.id);
+    removed++;
+  }
+  return removed;
+}
+for (const b of q(`SELECT id, name FROM boards`).all()) {
+  const n = dedupeBoard(b.id);
+  if (n) console.log(`dedupe: removed ${n} exact duplicate(s) from "${b.name}"`);
+}
 
 // Deleted items stay recoverable for a week, then their files go.
 for (const row of q(`SELECT id, file FROM items WHERE deleted_at IS NOT NULL AND deleted_at < ?`).all(new Date(Date.now() - 7 * 864e5).toISOString())) {
@@ -92,17 +123,24 @@ function createBoard(name, sourceUrl = null) {
 
 const nextPosition = (boardId) => q(`SELECT COALESCE(MAX(position), 0) + 1 p FROM items WHERE board_id = ?`).get(boardId).p;
 
+const existingCopy = (boardId, hash) => q(`SELECT * FROM items WHERE board_id = ? AND hash = ? AND deleted_at IS NULL ORDER BY position, id LIMIT 1`).get(boardId, hash);
+
 async function addItem(boardId, buf, info = {}) {
+  const hash = sha(buf);
+  let dup = existingCopy(boardId, hash);
+  if (dup) return { ...itemOut(dup), duplicate: true };
   const img = await processImage(buf);
+  dup = existingCopy(boardId, hash);            // another save may have landed meanwhile
+  if (dup) return { ...itemOut(dup), duplicate: true };
   const file = crypto.randomBytes(9).toString('hex');
   fs.writeFileSync(path.join(IMAGES, file + '.webp'), img.view);
   fs.writeFileSync(path.join(IMAGES, file + '.orig'), buf);
   const t = now();
-  const r = q(`INSERT INTO items (board_id, position, name, source_url, image_url, page_title, ext_id, file, mime, w, h, ow, oh, meta, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  const r = q(`INSERT INTO items (board_id, position, name, source_url, image_url, page_title, ext_id, file, hash, mime, w, h, ow, oh, meta, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     boardId, info.position ?? nextPosition(boardId), (info.name || '').slice(0, 300),
     info.sourceUrl || null, info.imageUrl || null, (info.pageTitle || '').slice(0, 300) || null, info.extId || null,
-    file, img.mime, img.w, img.h, img.ow, img.oh, JSON.stringify(img.meta), t);
+    file, hash, img.mime, img.w, img.h, img.ow, img.oh, JSON.stringify(img.meta), t);
   q(`UPDATE boards SET updated_at = ? WHERE id = ?`).run(t, boardId);
   return itemOut(q(`SELECT * FROM items WHERE id = ?`).get(r.lastInsertRowid));
 }
@@ -161,7 +199,8 @@ async function runPinterestImport(job, url, boardId) {
         const i = next++, pin = todo[i];
         try {
           const { buf } = await download(pin.imageUrl, 'https://www.pinterest.com/');
-          await addItem(board.id, buf, { position: base + i, name: pin.name, sourceUrl: pin.sourceUrl, imageUrl: pin.imageUrl, extId: pin.extId });
+          const saved = await addItem(board.id, buf, { position: base + i, name: pin.name, sourceUrl: pin.sourceUrl, imageUrl: pin.imageUrl, extId: pin.extId });
+          if (saved.duplicate) job.dupes++;
         } catch { job.failed++; }
         job.done++;
       }
@@ -245,7 +284,7 @@ async function route(req, res) {
           sourceUrl: body.source || got.pageUrl || (got.imageUrl.startsWith('data:') ? null : got.imageUrl),
           pageTitle: body.title || got.title, name: body.name,
         });
-        return send(res, 201, item);
+        return send(res, item.duplicate ? 200 : 201, item);
       }
       const buf = await readBody(req);
       if (!buf.length) return fail(res, 400, 'Empty upload');
@@ -254,7 +293,7 @@ async function route(req, res) {
         imageUrl: sp.get('image_url'), sourceUrl: sp.get('source') || sp.get('image_url'),
         pageTitle: sp.get('title'), name: sp.get('name'),
       });
-      return send(res, 201, item);
+      return send(res, item.duplicate ? 200 : 201, item);
     } catch (e) {
       return fail(res, 422, e.message || 'Could not save that image');
     }
@@ -306,7 +345,7 @@ async function route(req, res) {
   if (p === '/api/import/pinterest' && m === 'POST') {
     const body = await readJson(req);
     if (!body.url) return fail(res, 400, 'Paste a Pinterest board link');
-    const job = { id: crypto.randomBytes(6).toString('hex'), status: 'starting', found: 0, total: 0, done: 0, failed: 0, skipped: 0 };
+    const job = { id: crypto.randomBytes(6).toString('hex'), status: 'starting', found: 0, total: 0, done: 0, failed: 0, skipped: 0, dupes: 0 };
     jobs.set(job.id, job);
     runPinterestImport(job, String(body.url), body.boardId || null);
     return send(res, 202, job);
