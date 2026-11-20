@@ -20,10 +20,11 @@ const S = {
   boards: [], board: null, items: [],
   q: '', tags: new Set(), results: null,
   pending: 0, busy: 0, hover: null,
-  sel: new Set(), anchor: null,   // multi-select: chosen ids, and where a shift-click range starts
+  selectMode: false, sel: new Set(), anchor: null,   // select mode, chosen ids, and where a range starts
 };
 
 const bar = $('#bar'), main = $('#main'), tagbar = $('#tagbar');
+let sweep = null, sweepJustEnded = false;   // drag-across selection in progress
 
 // ---------------------------------------------------------------------------
 // Fitting. This is the heart of igrid: given one image and the tile shape,
@@ -134,7 +135,7 @@ const tellExtension = () => window.postMessage({ igrid: 'boards-changed' }, loca
 // ---------------------------------------------------------------------------
 async function go() {
   const h = location.hash.replace(/^#\/?/, '');
-  S.q = ''; S.tags.clear(); S.results = null; S.hover = null; tagbar.innerHTML = ''; tiles.clear(); S.sel.clear(); S.anchor = null; renderSelbar();
+  S.q = ''; S.tags.clear(); S.results = null; S.hover = null; tagbar.innerHTML = ''; tiles.clear(); S.selectMode = false; S.sel.clear(); S.anchor = null; renderSelbar();
   const m = h.match(/^b\/(\d+)$/);
   try {
     if (m) { S.view = 'board'; await loadBoard(+m[1]); renderBoardBar(); renderGrid(); }
@@ -236,6 +237,7 @@ function renderBoardBar() {
     <label class="ctl" title="Tile size">Size <input type="range" id="size" min="50" max="520" step="5" value="${setting('size', 220)}"></label>
     <select id="shape" title="Tile shape">${SHAPES.map(([v, l]) => `<option value="${v}" ${setting('shape', 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
     <select id="fit" title="How images fill tiles">${FITS.map(([v, l]) => `<option value="${v}" ${setting('fit', 'smart') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <button class="btn" id="selmode" title="Select several images to move or delete together">Select</button>
     <div class="menuwrap"><button class="btn primary" data-menu>Add</button><div class="menu">
       <button id="addurl">Add image by address</button>
       <button id="addfile">Upload from this Mac</button>
@@ -260,6 +262,7 @@ function renderBoardBar() {
     const url = await ask({ title: 'Add image by address', html: '<p>Paste the address of an image, or of a page: igrid uses the page\'s preview image.</p>', placeholder: 'https://', cta: 'Add' });
     if (url) addUrl(url);
   };
+  $('#selmode').onclick = () => (S.selectMode ? exitSelect() : enterSelect());
   $('#addfile').onclick = () => $('#filepick').click();
   $('#addpin').onclick = () => importPinterest(b.id);
   $('#setup').onclick = showSetup;
@@ -285,7 +288,9 @@ function tileEl(item, T, fit, boardName) {
     tiles.set(item.id, el);
   }
   el.className = S.sel.has(item.id) ? 'tile selected' : 'tile';
-  el.draggable = S.view === 'board' && !filtered();
+  // In select mode only chosen tiles drag (they move as a group); the rest are swept over to choose them.
+  // Nothing becomes draggable mid-sweep, or the browser would turn the sweep into a drag.
+  el.draggable = S.view === 'board' && !filtered() && !sweep && (!S.selectMode || S.sel.has(item.id));
   $('.top', el).hidden = S.view !== 'board' || S.items[0]?.id === item.id;
   $('.bottom', el).hidden = S.view !== 'board' || S.items.at(-1)?.id === item.id;
   const sub = [boardName, item.tags.map((t) => '#' + t).join(' ')].filter(Boolean).join('  ');
@@ -316,13 +321,21 @@ function renderGrid() {
   const shape = setting('shape', 'auto');
   const T = shape === 'auto' ? autoAspect(S.items) : +shape;
   const fit = setting('fit', 'smart');
-  const grid = document.createElement('div');
-  grid.className = S.sel.size ? 'grid selecting' : 'grid';
+  // Update the grid in place. Rebuilding it would collapse the page for a
+  // moment and throw the scroll position back to the top.
+  let grid = main.firstElementChild;
+  if (!grid || !grid.classList.contains('grid') || main.children.length !== 1) {
+    grid = document.createElement('div');
+    main.replaceChildren(grid);
+  }
+  grid.className = S.selectMode ? 'grid selecting' : 'grid';
   grid.style.setProperty('--size', setting('size', 220) + 'px');
   grid.style.setProperty('--ar', T);
-  for (const it of list) grid.append(tileEl(it, T, fit));
-  for (let i = 0; i < S.pending; i++) { const p = document.createElement('div'); p.className = 'tile pending'; grid.append(p); }
-  main.replaceChildren(grid);
+  const wanted = list.map((it) => tileEl(it, T, fit));
+  for (let i = 0; i < S.pending; i++) { const p = document.createElement('div'); p.className = 'tile pending'; wanted.push(p); }
+  let ref = grid.firstChild;
+  for (const el of wanted) { if (el === ref) ref = ref.nextSibling; else grid.insertBefore(el, ref); }
+  while (ref) { const next = ref.nextSibling; ref.remove(); ref = next; }
   if (filtered() && !list.length) main.innerHTML = `<div class="empty"><h2>No matches</h2>Nothing on this board matches that search.</div>`;
 }
 
@@ -346,14 +359,13 @@ main.addEventListener('click', (e) => {
   const item = findItem(tile.dataset.id); if (!item) return;
   const onButton = e.target.closest('.acts button');
   if (S.view === 'board' && !onButton) {
-    if (e.shiftKey && S.anchor != null) return selectRange(item.id);
-    if (e.target.closest('.sel') || e.metaKey || e.ctrlKey || S.sel.size) return toggleSelect(item.id);
+    if (sweepJustEnded) return;
+    if (e.shiftKey && S.anchor != null) { S.selectMode = true; return selectRange(item.id); }
+    if (e.target.closest('.sel') || e.metaKey || e.ctrlKey || S.selectMode) { S.selectMode = true; return toggleSelect(item.id); }
   }
-  // A button on a selected tile acts on the whole selection.
-  const group = S.sel.has(item.id) && S.sel.size > 1 ? selectedItems() : [item];
-  if (e.target.closest('.del')) return removeItems(group);
-  if (e.target.closest('.top')) return moveToEnd(group, true);
-  if (e.target.closest('.bottom')) return moveToEnd(group, false);
+  if (e.target.closest('.del')) return removeItems([item]);
+  if (e.target.closest('.top')) return moveToEnd([item], true);
+  if (e.target.closest('.bottom')) return moveToEnd([item], false);
   if (e.target.closest('.info') || !item.source_url) return openDetail(item.id);
   window.open(item.source_url, '_blank', 'noopener');
 });
@@ -372,17 +384,57 @@ function selectRange(id) {
   for (let i = Math.min(a, b); i <= Math.max(a, b); i++) S.sel.add(list[i].id);
   renderGrid();
 }
-function clearSelection() { if (!S.sel.size) return; S.sel.clear(); S.anchor = null; renderGrid(); }
+function enterSelect() { S.selectMode = true; renderGrid(); }
+function exitSelect() { S.selectMode = false; S.sel.clear(); S.anchor = null; renderGrid(); }
+function selectAll() { S.selectMode = true; for (const i of visibleItems()) S.sel.add(i.id); renderGrid(); }
 function renderSelbar() {
-  const bar = $('#selbar'), n = S.view === 'board' ? S.sel.size : 0;
-  document.body.classList.toggle('has-selection', n > 0);
-  bar.hidden = !n;
-  if (n) $('#selcount').textContent = `${n} selected`;
+  const bar = $('#selbar'), on = S.view === 'board' && S.selectMode, n = S.sel.size;
+  document.body.classList.toggle('has-selection', on);
+  bar.hidden = !on;
+  const btn = $('#selmode');
+  if (btn) { btn.textContent = on ? 'Done' : 'Select'; btn.classList.toggle('primary', on); }
+  if (!on) return;
+  $('#selcount').textContent = n ? `${n} selected` : 'Click or drag across images to select';
+  bar.querySelectorAll('[data-needs]').forEach((b) => { b.disabled = !n; });
 }
+
+// Sweep-select: in select mode, press on an unchosen image and drag across
+// others to choose everything in between. Chosen images drag to move instead.
+main.addEventListener('pointerdown', (e) => {
+  if (!S.selectMode || S.view !== 'board' || e.button !== 0 || e.shiftKey) return;
+  const tile = e.target.closest('.tile[data-id]');
+  if (!tile || S.sel.has(+tile.dataset.id)) return;
+  sweep = { start: +tile.dataset.id, last: +tile.dataset.id, base: new Set(S.sel), moved: false };
+});
+function sweepTo(e) {
+  const tile = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.tile[data-id]');
+  if (!tile || +tile.dataset.id === sweep.last) return;
+  sweep.last = +tile.dataset.id; sweep.moved = true;
+  const list = visibleItems();
+  const a = list.findIndex((i) => i.id === sweep.start), b = list.findIndex((i) => i.id === sweep.last);
+  if (a < 0 || b < 0) return;
+  S.sel = new Set(sweep.base);
+  for (let i = Math.min(a, b); i <= Math.max(a, b); i++) S.sel.add(list[i].id);
+  S.anchor = sweep.last;
+  renderGrid();
+}
+window.addEventListener('pointermove', (e) => {
+  if (!sweep) return;
+  if (!(e.buttons & 1)) { sweep = null; return; }
+  sweepTo(e);
+});
+window.addEventListener('pointerup', (e) => {
+  if (!sweep) return;
+  sweepTo(e);                                   // the release point counts too
+  if (sweep.moved) { sweepJustEnded = true; setTimeout(() => { sweepJustEnded = false; }, 0); }
+  sweep = null;
+  renderGrid();                                 // chosen tiles become draggable again
+});
+
 $('#selbar').onclick = (e) => {
   const act = e.target.closest('button')?.dataset.act; if (!act) return;
-  if (act === 'clear') return clearSelection();
-  if (act === 'all') { for (const i of visibleItems()) S.sel.add(i.id); return renderGrid(); }
+  if (act === 'clear') return exitSelect();
+  if (act === 'all') return selectAll();
   const group = selectedItems();
   if (act === 'top') moveToEnd(group, true);
   if (act === 'bottom') moveToEnd(group, false);
@@ -430,10 +482,11 @@ let drag = null;
 const clearMarks = () => main.querySelectorAll('.before,.after').forEach((t) => t.classList.remove('before', 'after'));
 main.addEventListener('dragstart', (e) => {
   const tile = e.target.closest?.('.tile[data-id]');
+  if (sweep) { e.preventDefault(); return; }
   if (!tile || S.view !== 'board' || filtered()) return;
   const id = +tile.dataset.id;
   // Dragging a selected tile carries the whole selection; any other tile travels alone.
-  const ids = S.sel.has(id) && S.sel.size > 1 ? new Set(S.sel) : new Set([id]);
+  const ids = S.sel.has(id) ? new Set(S.sel) : new Set([id]);
   drag = { ids, target: null };
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('application/x-igrid', [...ids].join(','));
@@ -650,9 +703,12 @@ document.addEventListener('keydown', (e) => {
   }
   if (typing || $('dialog[open]')) return;
   if (S.view === 'board') {
-    if (e.key === 'Escape' && S.sel.size) return clearSelection();
-    if ((e.metaKey || e.ctrlKey) && e.key === 'a') { e.preventDefault(); for (const i of visibleItems()) S.sel.add(i.id); return renderGrid(); }
-    if ((e.key === 'Backspace' || e.key === 'Delete') && S.sel.size) { e.preventDefault(); return removeItems(selectedItems()); }
+    if (e.key === 'Escape' && S.selectMode) return exitSelect();
+    if ((e.metaKey || e.ctrlKey) && e.key === 'a') { e.preventDefault(); return selectAll(); }
+    if (S.selectMode) {       // keys act on the selection, never on whatever is under the pointer
+      if ((e.key === 'Backspace' || e.key === 'Delete') && S.sel.size) { e.preventDefault(); removeItems(selectedItems()); }
+      return;
+    }
   }
   if (e.key === '/') { e.preventDefault(); $('#search')?.focus(); return; }
   const item = S.hover && findItem(S.hover);

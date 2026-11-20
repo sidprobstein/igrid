@@ -41,7 +41,7 @@ cd /Users/sid/Code/igrid && launchctl bootout gui/$(id -u)/work.igrid.server && 
 | Order | Drag tiles, or use the arrows on a tile to send it to the top or bottom. New images go to the end. Nothing else ever reorders a board. |
 | Names and tags | Optional, in the details view (pencil button or Space while hovering). |
 | Search | In a board: names, tags, page titles, source sites. On the home page: across all boards. Tag chips filter. `/` focuses search. |
-| Multi-select | Click the circle on a tile, or Cmd-click; Shift-click selects a range; Cmd+A selects all; Esc clears. Drag any selected tile to move the whole selection, in order, to a new position. The bar at the bottom sends the selection to the top or bottom, or deletes it. |
+| Multi-select | **Select** in the top bar enters select mode: tile buttons disappear and every tile shows a circle. Click tiles to choose them, or press on one and drag across others to sweep up everything in between. Shift-click selects a range, Cmd+A selects all. Drag any chosen tile to move the whole selection, in order, to a new position. The bar at the bottom sends the selection to the top or bottom, or deletes it. Done or Esc leaves select mode. Cmd-click a tile is a shortcut into it. |
 | Duplicates | An image whose file is byte-for-byte identical to one already on the board is not added again. Existing exact duplicates are removed when the server starts: the first copy stays and inherits any name, tags or link it lacked. |
 | Delete | X on the tile, or Backspace while hovering. Undo for a few seconds; files are purged after 7 days. |
 | Click-through | Clicking a tile opens the page it was saved from. |
