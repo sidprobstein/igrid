@@ -63,8 +63,23 @@ function fitTile(el, item, T, fit) {
   else if (lost <= 0.34) mode = 'cover';                           // a photo that crops well
   else mode = 'blur';                                              // too far off: show all of it
 
+  // Zoom-out steps the user has asked for on this image. First the whole
+  // picture comes into view (if it was cropped); then, where the backdrop is
+  // one flat colour, the margin grows a step at a time.
+  const cropped = mode === 'cover' && lost > 0.02;
+  const padMax = m.bg ? 3 : 0;
+  const steps = (cropped ? 1 : 0) + padMax;
+  const z = Math.min(item.zoom || 0, steps);
+  let pad = 0;
+  if (z > 0) {
+    if (cropped) mode = extendable ? 'flat' : 'blur';
+    pad = z - (cropped ? 1 : 0);
+    if (pad > 0) mode = 'flat';
+  }
+
   el.classList.remove('flat', 'blur', 'padded');
   el.style.background = '';
+  el.style.removeProperty('--pad');
   img.style.objectPosition = '';
   if (mode === 'cover') {
     // Slide the crop window so the focal point sits as near centre as it can.
@@ -75,16 +90,19 @@ function fitTile(el, item, T, fit) {
     el.style.background = m.dom || '';
   } else if (mode === 'flat') {
     el.classList.add('flat');
-    if (m.bg === 'alpha') { el.style.background = 'var(--alpha-bg)'; el.classList.add('padded'); }
+    const base = m.bg === 'alpha' || m.trimmed ? 6 : 0;
+    if (m.bg === 'alpha') el.style.background = 'var(--alpha-bg)';
+    else if (pad) el.style.background = m.bg;
     else {
       const [c1, c2] = [sides[0] || m.bg, sides[1] || m.bg];
       el.style.background = c1 === c2 ? c1 : `linear-gradient(${wide ? 'to bottom' : 'to right'}, ${c1} 50%, ${c2} 50%)`;
-      if (m.trimmed) el.classList.add('padded');
     }
+    if (base + pad) { el.classList.add('padded'); el.style.setProperty('--pad', base + pad * 6 + '%'); }
   } else {
     el.classList.add('blur');
     $('.backdrop', el).style.backgroundImage = `url(${m.lqip})`;
   }
+  return { z, steps };
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +302,7 @@ function tileEl(item, T, fit, boardName) {
   if (!el) {
     el = document.createElement('div');
     el.dataset.id = item.id;
-    el.innerHTML = `<div class="backdrop"></div><img class="pic" loading="lazy" draggable="false" alt="" src="/img/${item.file}.webp"><div class="cap"></div><button class="sel" title="Select (or Cmd-click, Shift-click for a range)">✓</button><div class="acts"><button class="top" title="Move to top of board">↑</button><button class="bottom" title="Move to bottom of board">↓</button><button class="info" title="Details (Space)">✎</button><button class="del" title="Delete (Backspace)">✕</button></div>`;
+    el.innerHTML = `<div class="backdrop"></div><img class="pic" loading="lazy" draggable="false" alt="" src="/img/${item.file}.webp"><div class="cap"></div><button class="sel" title="Select (or Cmd-click, Shift-click for a range)">✓</button><div class="zoom"><button class="zin" title="Zoom back in">+</button><button class="zout" title="Zoom out: show more margin">−</button></div><div class="acts"><button class="top" title="Move to top of board">↑</button><button class="bottom" title="Move to bottom of board">↓</button><button class="info" title="Details (Space)">✎</button><button class="del" title="Delete (Backspace)">✕</button></div>`;
     tiles.set(item.id, el);
   }
   el.className = S.sel.has(item.id) ? 'tile selected' : 'tile';
@@ -297,7 +315,10 @@ function tileEl(item, T, fit, boardName) {
   $('.cap', el).innerHTML = (item.name ? `<b>${esc(item.name)}</b>` : '') + (sub ? `<span>${esc(sub)}</span>` : '');
   $('img.pic', el).alt = item.name;
   el.title = item.source_url ? 'Open ' + host(item.source_url) : '';
-  fitTile(el, item, T, fit);
+  const { z, steps } = fitTile(el, item, T, fit);
+  el._zoom = { z, steps };
+  $('.zout', el).hidden = z >= steps;
+  $('.zin', el).hidden = z <= 0;
   return el;
 }
 
@@ -357,12 +378,14 @@ const findItem = (id) => currentList().find((i) => i.id === +id);
 main.addEventListener('click', (e) => {
   const tile = e.target.closest('.tile[data-id]'); if (!tile) return;
   const item = findItem(tile.dataset.id); if (!item) return;
-  const onButton = e.target.closest('.acts button');
+  const onButton = e.target.closest('.acts button, .zoom button');
   if (S.view === 'board' && !onButton) {
     if (sweepJustEnded) return;
     if (e.shiftKey && S.anchor != null) { S.selectMode = true; return selectRange(item.id); }
     if (e.target.closest('.sel') || e.metaKey || e.ctrlKey || S.selectMode) { S.selectMode = true; return toggleSelect(item.id); }
   }
+  if (e.target.closest('.zout')) return zoomItems([item], 1);
+  if (e.target.closest('.zin')) return zoomItems([item], -1);
   if (e.target.closest('.del')) return removeItems([item]);
   if (e.target.closest('.top')) return moveToEnd([item], true);
   if (e.target.closest('.bottom')) return moveToEnd([item], false);
@@ -440,6 +463,8 @@ $('#selbar').onclick = (e) => {
   if (act === 'bottom') moveToEnd(group, false);
   if (act === 'delete') removeItems(group);
   if (act === 'move') moveToBoard(group);
+  if (act === 'zout') zoomItems(group, 1);
+  if (act === 'zin') zoomItems(group, -1);
 };
 main.addEventListener('mouseover', (e) => { const t = e.target.closest('.tile[data-id]'); S.hover = t ? +t.dataset.id : null; });
 
@@ -456,6 +481,22 @@ async function moveToEnd(group, top) {
   S.items = top ? [...group, ...rest] : [...rest, ...group];
   renderGrid();
   await saveOrder();
+}
+
+// Zoom images out (or back in) one step. Each image moves only if it has a
+// step left in that direction, so a mixed selection settles toward a match.
+async function zoomItems(group, by) {
+  const changed = [];
+  for (const item of group) {
+    const st = tiles.get(item.id)?._zoom; if (!st) continue;
+    const next = Math.max(0, Math.min(st.steps, st.z + by));
+    if (next !== st.z) { item.zoom = next; changed.push(item); }
+  }
+  if (!changed.length) return toast(by > 0 ? 'Already zoomed out as far as these go' : 'Already at normal size');
+  S.view === 'board' ? renderGrid() : renderHome();
+  S.busy++;
+  try { await Promise.all(changed.map((i) => api('/api/items/' + i.id, { method: 'PATCH', json: { zoom: i.zoom } }))); }
+  catch (e) { oops(e); } finally { S.busy--; }
 }
 
 // Choose a destination board for the selection. Resolves to a board or null.

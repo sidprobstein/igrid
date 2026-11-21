@@ -88,7 +88,7 @@ input[type="range"] { width: 110px; accent-color: var(--accent); }
 }
 .tile img.pic { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; -webkit-user-drag: none; user-select: none; }
 .tile.flat img.pic, .tile.blur img.pic { object-fit: contain; }
-.tile.padded img.pic { padding: 6%; }
+.tile.padded img.pic { padding: var(--pad, 6%); }
 /* Stretched, not zoomed: each bar shows the blurred part of the picture nearest to it, so the picture's own edges carry on outward. */
 .tile .backdrop { position: absolute; inset: -6%; background-size: 100% 100%; filter: blur(18px) saturate(1.1); display: none; }
 .tile.blur .backdrop { display: block; }
@@ -110,6 +110,15 @@ input[type="range"] { width: 110px; accent-color: var(--accent); }
 }
 .tile .acts button:hover { background: #111; }
 .tile .acts button[hidden] { display: none; }
+.tile .zoom { position: absolute; bottom: 7px; right: 7px; z-index: 4; display: flex; gap: 5px; opacity: 0; transition: opacity .12s; }
+.tile:hover .zoom { opacity: 1; }
+.tile .zoom button { width: 28px; height: 28px; border-radius: 99px; border: 0; cursor: pointer; display: grid; place-items: center; background: rgba(20, 20, 18, .72); color: #fff; font-size: 16px; line-height: 1; backdrop-filter: blur(6px); }
+.tile .zoom button:hover { background: #111; }
+.tile .zoom button[hidden] { display: none; }
+.grid.selecting .tile .zoom { display: none; }
+@container (max-width: 150px) { .tile .zoom { bottom: 4px; right: 4px; gap: 3px; } .tile .zoom button { width: 22px; height: 22px; font-size: 13px; } }
+@container (max-width: 112px) { .tile .zoom { bottom: 3px; right: 3px; gap: 2px; } .tile .zoom button { width: 17px; height: 17px; font-size: 11px; } }
+@container (max-width: 84px) { .tile .zoom { display: none; } }
 /* Small tiles: the buttons shrink, then thin out, so they never cover the picture. */
 @container (max-width: 150px) {
   .tile .acts { top: 4px; right: 4px; gap: 3px; }

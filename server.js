@@ -58,6 +58,7 @@ const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
 // Exact-duplicate detection: every image carries the hash of its original file.
 if (!q(`PRAGMA table_info(items)`).all().some((c) => c.name === 'hash')) db.exec(`ALTER TABLE items ADD COLUMN hash TEXT`);
+if (!q(`PRAGMA table_info(items)`).all().some((c) => c.name === 'zoom')) db.exec(`ALTER TABLE items ADD COLUMN zoom INTEGER NOT NULL DEFAULT 0`);
 db.exec(`CREATE INDEX IF NOT EXISTS items_hash ON items(board_id, hash)`);
 for (const row of q(`SELECT id, file FROM items WHERE hash IS NULL`).all()) {
   try { q(`UPDATE items SET hash = ? WHERE id = ?`).run(sha(fs.readFileSync(path.join(IMAGES, row.file + '.orig'))), row.id); } catch {}
@@ -95,7 +96,7 @@ for (const row of q(`SELECT id, file FROM items WHERE deleted_at IS NOT NULL AND
 const itemOut = (r) => ({
   id: r.id, board_id: r.board_id, name: r.name, tags: JSON.parse(r.tags),
   source_url: r.source_url, image_url: r.image_url, page_title: r.page_title,
-  file: r.file, w: r.w, h: r.h, ow: r.ow, oh: r.oh, meta: JSON.parse(r.meta), created_at: r.created_at,
+  file: r.file, w: r.w, h: r.h, ow: r.ow, oh: r.oh, meta: JSON.parse(r.meta), zoom: r.zoom || 0, created_at: r.created_at,
 });
 const boardOut = (r) => ({
   id: r.id, name: r.name, settings: JSON.parse(r.settings), source_url: r.source_url,
@@ -346,6 +347,7 @@ async function route(req, res) {
         const tags = [...new Set(body.tags.map((t) => String(t).trim().replace(/^#/, '').toLowerCase()).filter(Boolean))].slice(0, 50);
         q(`UPDATE items SET tags = ? WHERE id = ?`).run(JSON.stringify(tags), row.id);
       }
+      if (Number.isInteger(body.zoom)) q(`UPDATE items SET zoom = ? WHERE id = ?`).run(Math.max(0, Math.min(8, body.zoom)), row.id);
       if (typeof body.source_url === 'string') q(`UPDATE items SET source_url = ? WHERE id = ?`).run(body.source_url.trim() || null, row.id);
       if (Number.isInteger(body.board_id) && body.board_id !== row.board_id && getBoard(body.board_id)) {
         q(`UPDATE items SET board_id = ?, position = ? WHERE id = ?`).run(body.board_id, nextPosition(body.board_id), row.id);

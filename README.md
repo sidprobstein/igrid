@@ -38,6 +38,7 @@ cd /Users/sid/Code/igrid && launchctl bootout gui/$(id -u)/work.igrid.server && 
 | Boards | Create, rename (click the title), archive and restore. Boards are never deleted. |
 | Capture | Right-click any image in Chrome, **Save to igrid**, pick a board (extension). Also: drag an image in from another window, paste with Cmd+V, add by address, upload files. |
 | Grid | Size slider, tile shape (Auto follows the board's typical image), fit mode. Saved per board. |
+| Zoom out | A **−** button appears on a tile only when that image can show more margin. The first step brings a cropped image fully into view; on a flat backdrop, three more steps widen the margin. **+** steps back. In select mode, **− Zoom** and **+ Zoom** apply one step to every chosen image that has room. Saved per image. |
 | Order | Drag tiles, or use the arrows on a tile to send it to the top or bottom. New images go to the end. Nothing else ever reorders a board. |
 | Names and tags | Optional, in the details view (pencil button or Space while hovering). |
 | Search | In a board: names, tags, page titles, source sites. On the home page: across all boards. Tag chips filter. `/` focuses search. |
